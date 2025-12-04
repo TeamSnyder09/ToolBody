@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Tool Tracker Mobile</title>
+
+<!-- PWA Manifest -->
+<link rel="manifest" href="data:application/manifest+json,{
+  \"name\": \"Tool Tracker Pro\",
+  \"short_name\": \"ToolTracker\",
+  \"start_url\": \".\",
+  \"display\": \"standalone\",
+  \"background_color\": \"#1a3c6e\",
+  \"theme_color\": \"#1a3c6e\",
+  \"icons\": [
+    {\"src\": \"https://via.placeholder.com/192x192/1a3c6e/ffffff?text=TT\", \"sizes\": \"192x192\", \"type\": \"image/png\"},
+    {\"src\": \"https://via.placeholder.com/512x512/1a3c6e/ffffff?text=TT\", \"sizes\": \"512x512\", \"type\": \"image/png\"}
+  ]
+}">
+
+<!-- iOS Support -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Tool Tracker">
+
+<!-- Firebase + Chart.js + QR Scanner -->
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; margin:0; background:#f0f4f8; -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; }
+  #app, #loginScreen, #scanner { display:none; }
+  .container { padding:15px; }
+  h1 { text-align:center; color:#1a3c6e; margin:20px 0 10px; font-size:1.8em; }
+  .card { background:white; border-radius:16px; padding:20px; margin:15px 0; box-shadow:0 4px 20px rgba(0,0,0,0.1); }
+  button { padding:16px; font-size:18px; border:none; border-radius:12px; width:100%; margin:10px 0; font-weight:bold; }
+  .btn-primary { background:#1a3c6e; color:white; }
+  .btn-success { background:#28a745; color:white; }
+  .btn-stop { background:#d9534f; color:white; }
+  .btn-scan { background:#6f42c1; color:white; }
+  .timer { font-size:3em; font-weight:bold; text-align:center; color:#c00; margin:20px 0; }
+  .machine-card { background:#e8f5e8; border-left:8px solid #28a745; padding:15px; margin:15px 0; border-radius:12px; }
+  .alert-overdue { background:#f8d7da; border-left:8px solid #dc3545; animation:pulse 2s infinite; }
+  @keyframes pulse { 0%,100% {opacity:1} 50% {opacity:0.7} }
+  #reader { width:100%; border-radius:16px; overflow:hidden; }
+  .big-btn { padding:24px; font-size:22px; }
+  .logout { position:absolute; top:15px; right:15px; background:#777; color:white; padding:8px 12px; border-radius:8px; font-size:14px; }
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="loginScreen" style="display:block;">
+  <div class="container" style="max-width:400px; margin:50px auto;">
+    <h1>Tool Tracker Pro</h1>
+    <div class="card">
+      <input type="email" id="email" placeholder="Email" style="width:100%; padding:14px; margin:10px 0; font-size:18px; border-radius:8px; border:1px solid #ccc;">
+      <input type="password" id="password" placeholder="Password" style="width:100%; padding:14px; margin:10px 0; font-size:18px; border-radius:8px; border:1px solid #ccc;">
+      <button class="btn-primary" onclick="login()">Login</button>
+      <button class="btn-success" onclick="register()">Register</button>
+      <p id="authMessage" style="color:red; text-align:center; margin-top:10px;"></p>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div id="app" class="container">
+  <button class="logout" onclick="logout()">Logout</button>
+  <h1>Tool Tracker</h1>
+  <p style="text-align:center; color:#555;">Logged in as <strong id="userEmail"></strong></p>
+
+  <!-- QR SCANNER -->
+  <div class="card">
+    <button class="btn-scan big-btn" onclick="openScanner()">SCAN TOOL QR CODE</button>
+  </div>
+
+  <!-- RUNNING MACHINES -->
+  <div id="runningSection">
+    <h2>Running Machines</h2>
+    <div id="runningMachines"></div>
+  </div>
+
+  <!-- QUICK START -->
+  <div class="card">
+    <h2>Manual Start</h2>
+    <select id="machineSelect" style="width:100%; padding:14px; margin:10px 0; font-size:18px; border-radius:8px;"></select>
+    <select id="toolSelect" style="width:100%; padding:14px; margin:10px 0; font-size:18px; border-radius:8px;"></select>
+    <button class="btn-primary big-btn" onclick="startOnSelected()">START JOB</button>
+  </div>
+
+  <button class="btn-success big-btn" onclick="location.href='dashboard.html'">Open Full Dashboard</button>
+</div>
+
+<!-- QR SCANNER MODAL -->
+<div id="scanner" style="position:fixed; top:0; left:0; width:100%; height:100%; background:black; z-index:999;">
+  <div style="padding:20px; color:white; text-align:center;">
+    <h2>Scan Tool QR Code</h2>
+    <button onclick="closeScanner()" style="background:#d9534f; padding:12px 20px; border-radius:50%; position:absolute; top:15px; right:15px; font-size:20px;">X</button>
+  </div>
+  <div id="reader"></div>
+  <div style="text-align:center; padding:20px; color:white;">
+    <p>Point camera at tool's QR code</p>
+  </div>
+</div>
+
+<script>
+// === YOUR FIREBASE CONFIG ===
+const firebaseConfig = {
+  apiKey: "AIzaSyDqjYXc2ERtXS74-Za16oVVjNy-KAv570I",
+  authDomain: "tool-body-tracker.firebaseapp.com",
+  projectId: "tool-body-tracker",
+  storageBucket: "tool-body-tracker.firebasestorage.app",
+  messagingSenderId: "945549260792",
+  appId: "1:945549260792:web:b88f5423f45b6c1139880d",
+  measurementId: "G-KQ69CQJZ73"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const auth = firebase.auth();
+
+let user = null;
+let activeSessions = {};
+let scanner = null;
+
+// Auth
+auth.onAuthStateChanged(u => {
+  if (u) {
+    user = u;
+    document.getElementById('userEmail').textContent = u.email.split('@')[0];
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+    loadData();
+    startRealtime();
+  } else {
+    document.getElementById('loginScreen').style.display = 'block';
+    document.getElementById('app').style.display = 'none';
+  }
+});
+
+async function login() {
+  const email = document.getElementById('email').value;
+  const pass = document.getElementById('password').value;
+  try { await auth.signInWithEmailAndPassword(email, pass); }
+  catch (e) { document.getElementById('authMessage').textContent = e.message; }
+}
+
+async function register() {
+  const email = document.getElementById('email').value;
+  const pass = document.getElementById('password').value;
+  try { await auth.createUserWithEmailAndPassword(email, pass); }
+  catch (e) { document.getElementById('authMessage').textContent = e.message; }
+}
+
+function logout() { auth.signOut(); }
+
+// Load machines & tools
+async function loadData() {
+  const [machinesSnap, toolsSnap] = await Promise.all([
+    db.collection('machines').orderBy('name').get(),
+    db.collection('tools').get()
+  ]);
+
+  const mSel = document.getElementById('machineSelect');
+  mSel.innerHTML = '<option>Select Machine</option>';
+  machinesSnap.forEach(doc => mSel.add(new Option(doc.data().name, doc.data().name)));
+
+  const tSel = document.getElementById('toolSelect');
+  tSel.innerHTML = '<option>Select Tool</option>';
+  toolsSnap.forEach(doc => tSel.add(new Option(doc.data().id, doc.data().id)));
+}
+
+// Realtime
+function startRealtime() {
+  db.collection('activeSessions').onSnapshot(snap => {
+    activeSessions = {};
+    snap.forEach(doc => {
+      const d = doc.data();
+      activeSessions[d.machine] = { docId: doc.id, ...d };
+    });
+    renderRunning();
+  });
+}
+
+function renderRunning() {
+  const container = document.getElementById('runningMachines');
+  if (Object.keys(activeSessions).length === 0) {
+    container.innerHTML = '<p style="text-align:center; color:#777;">No machines running</p>';
+    return;
+  }
+  container.innerHTML = '';
+  Object.entries(activeSessions).forEach(([machine, s]) => {
+    const elapsed = (Date.now() - s.start) / 1000;
+    const h = Math.floor(elapsed / 3600);
+    const m = String(Math.floor(elapsed % 3600 / 60)).padStart(2, '0');
+    const sec = String(Math.floor(elapsed % 60)).padStart(2, '0');
+
+    const card = document.createElement('div');
+    card.className = 'machine-card';
+    card.innerHTML = `
+      <h3>${machine}</h3>
+      <p>Tool: <strong>${s.tool}</strong></p>
+      <div class="timer">${h}:${m}:${sec}</div>
+      <button class="btn-stop big-btn" onclick="stopMachine('${machine}')">STOP JOB</button>
+    `;
+    container.appendChild(card);
+  });
+}
+
+// QR Scanner
+function openScanner() {
+  document.getElementById('scanner').style.display = 'block';
+  scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 });
+  scanner.render(onScanSuccess, onScanError);
+}
+
+function closeScanner() {
+  document.getElementById('scanner').style.display = 'none';
+  if (scanner) scanner.clear();
+}
+
+function onScanSuccess(qrCodeMessage) {
+  closeScanner();
+  startJobFromQR(qrCodeMessage);
+}
+
+function onScanError(err) { console.warn(err); }
+
+async function startJobFromQR(toolId) {
+  const machine = prompt(`Scanned Tool: ${toolId}\n\nEnter Machine Name to start job:`, "");
+  if (!machine) return;
+  if (activeSessions[machine]) return alert("That machine is already running!");
+  await db.collection('activeSessions').add({
+    machine,
+    tool: toolId,
+    start: Date.now(),
+    startBy: user.email
+  });
+  alert(`Started ${toolId} on ${machine}!`);
+}
+
+async function startOnSelected() {
+  const machine = document.getElementById('machineSelect').value;
+  const tool = document.getElementById('toolSelect').value;
+  if (!machine || !tool) return alert("Select machine and tool");
+  if (activeSessions[machine]) return alert("Already running!");
+  await db.collection('activeSessions').add({ machine, tool, start: Date.now(), startBy: user.email });
+}
+
+async function stopMachine(machine) {
+  const s = activeSessions[machine];
+  const duration = Date.now() - s.start;
+  await db.collection('completedSessions').add({ ...s, end: Date.now(), duration, endBy: user.email });
+  await db.collection('activeSessions').doc(s.docId).delete();
+}
+
+// Make it installable
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('data:application/javascript,console.log("SW registered");');
+}
+</script>
+</body>
+</html>
